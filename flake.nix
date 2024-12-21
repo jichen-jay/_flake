@@ -1,80 +1,90 @@
 {
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-  inputs.disko.url = "github:nix-community/disko";
-  inputs.disko.inputs.nixpkgs.follows = "nixpkgs";
-  inputs.nixos-facter-modules.url = "github:numtide/nixos-facter-modules";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    disko.url = "github:nix-community/disko";
+    disko.inputs.nixpkgs.follows = "nixpkgs";
+  };
 
   outputs =
+    { nixpkgs, disko, ... }:
+    let
+      system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+    in
     {
-      nixpkgs,
-      disko,
-      nixos-facter-modules,
-      ...
-    }:
-    {
-      nixosConfigurations.hetzner-cloud = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
-        modules = [
-          disko.nixosModules.disko
-          ./configuration.nix
-        ];
-      };
-      # tested with 2GB/2CPU droplet, 1GB droplets do not have enough RAM for kexec
-      nixosConfigurations.digitalocean = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
-        modules = [
-          disko.nixosModules.disko
-          { disko.devices.disk.disk1.device = "/dev/vda"; }
-          {
-            # do not use DHCP, as DigitalOcean provisions IPs using cloud-init
-            networking.useDHCP = nixpkgs.lib.mkForce false;
-
-            services.cloud-init = {
-              enable = true;
-              network.enable = true;
-
-              # not strictly needed, just for good measure
-              datasource_list = [ "DigitalOcean" ];
-              datasource.DigitalOcean = { };
-            };
-          }
-          ./configuration.nix
-        ];
-      };
-      nixosConfigurations.hetzner-cloud-aarch64 = nixpkgs.lib.nixosSystem {
-        system = "aarch64-linux";
-        modules = [
-          disko.nixosModules.disko
-          ./configuration.nix
-        ];
-      };
-
-      # Use this for all other targets
-      # nixos-anywhere --flake .#generic-nixos-facter --generate-hardware-config nixos-generate-config ./hardware-configuration.nix <hostname>
       nixosConfigurations.generic = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
+        inherit system;
         modules = [
           disko.nixosModules.disko
           ./configuration.nix
           ./hardware-configuration.nix
-        ];
-      };
+          (
+            { config, pkgs, ... }:
+            {
+              # Add function parameters here
+              # Rest of your configuration...
+              services.openssh = {
+                enable = true;
+                settings = {
+                  PasswordAuthentication = false;
+                  AllowTcpForwarding = true;
+                  AllowStreamLocalForwarding = true;
+                  PermitRootLogin = "prohibit-password";
+                  X11Forwarding = false;
+                };
+              };
+              programs.ssh.startAgent = true;
 
-      # Slightly experimental: Like generic, but with nixos-facter (https://github.com/numtide/nixos-facter)
-      # nixos-anywhere --flake .#generic-nixos-facter --generate-hardware-config nixos-facter facter.json <hostname>
-      nixosConfigurations.generic-nixos-facter = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
-        modules = [
-          disko.nixosModules.disko
-          ./configuration.nix
-          nixos-facter-modules.nixosModules.facter
-          {
-            config.facter.reportPath =
-              if builtins.pathExists ./facter.json then
-                ./facter.json
-              else
-                throw "Have you forgotten to run nixos-anywhere with `--generate-hardware-config nixos-facter ./facter.json`?";
-          }
+              users.users = {
+                jaykchen = {
+                  isNormalUser = true;
+                  description = "jaykchen";
+                  extraGroups = [
+                    "networkmanager"
+                    "wheel"
+                    "podman"
+                  ];
+                  shell = pkgs.bash;
+                  openssh.authorizedKeys.keys = [
+                    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBxv0E+eDCgj7DgjWQJD7NvvjXAj2ZMIVT0gYP5PkvIz jaykchen@nixos"
+                    "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCskmS2vKyKo0tt5rfgrEveKM0mfxTSoSgJ7wADFm+k78EidC0zvP2+YhC28eU6Xyn1VRimDnvN0Gf76o+A6wudb2lDDi95Nm0WH3wexlVkCVZel/eUBR8ubyHJuzX0E7hiFNjxtzXnQ9ZUvrUViirfBaOBk78Ie5nn/F62HNcG9sv3V5p5fLvbCpjDWWY0aFZePm064cSRZUgSfo0kCaeFtARKpVUGzBtFDE7FSfaL1ORK+vEsqtwkf+dfrP6Cep0b99wKXz6TK38L6AdgJHfM4a8CWNB6UoX69a81vRBMxK6hUEFW+HYQ0aOF5PdtWi4PDpe1P85mFwhH0cvHPvG0yqOAutEUSWzaGtzNTkXJnFpnN+p7fMZQ1f4NBnl4/FObQgUbPVARyqggl/VoZJ4XjBtxmiq0dDQQ1Epny2OOSzbGyn7xxjUmMnL22/LLPQfiSXMW2YMKnsQH80nERFxfcZhyYvev5edmPzdDBi6kSOlmjC/pJOXGQkfSbTsPtUN3WmGP1pWSKHV1/h2WFuBNGBubsPQtj2ThYjgfYR+8tITMMEjLeIi11+abDKjEQBD2HXwJOmV7P4DYv9TmnKqPtJURwJ0olpxAGooTDR5C16Nv/gWQ4Qa6L+WXOKztiTiv3PhU+U+DERvJiobQdTxIiFyBH0c1cOPq/fcz+n8cDw== jaykchen@gmail.com"
+                  ];
+                };
+                root.openssh.authorizedKeys.keys = config.users.users.jaykchen.openssh.authorizedKeys.keys;
+              };
+
+              # Base configuration
+              nixpkgs.config.allowUnfree = true;
+              nix.settings = {
+                experimental-features = [
+                  "nix-command"
+                  "flakes"
+                ];
+                max-jobs = "auto";
+                trusted-users = [
+                  "root"
+                  "@wheel"
+                  "jaykchen"
+                ];
+              };
+
+              # System packages
+              environment.systemPackages = with pkgs; [
+                git
+                tmux
+                wget
+                tree
+                curl
+                file
+                btop
+                podman
+                podman-compose
+                podman-tui
+              ];
+
+              system.stateVersion = "24.11";
+            }
+          )
         ];
       };
     };

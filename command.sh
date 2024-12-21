@@ -6,8 +6,9 @@ nix run github:nix-community/nixos-anywhere -- \
   --copy-host-keys \
   --generate-hardware-config nixos-generate-config \
   ./hardware-configuration.nix \
-  --flake .#x86_64-linux \
+  --flake .#generic \
   --target-host root@43.130.1.178
+
 
 //run on remote
 nix run github:nix-community/nixos-anywhere --   --skip-new-key   -i ~/.ssh/nixos_key   --generate-hardware-config nixos-generate-config   ./hardware-configuration.nix   --flake .#x86_64-linux   --target-host root@43.130.1.178
